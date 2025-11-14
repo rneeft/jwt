@@ -158,6 +158,17 @@
             font-family: 'Courier New', monospace;
             font-size: 14px;
         }
+        
+        /* Editable payload styling */
+        .payload-editable {
+            background-color: #fff8dc !important;
+            border-left: 4px solid #ffa500 !important;
+        }
+        
+        .payload-editor-label {
+            color: #ff8c00;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -197,8 +208,16 @@
                             <textarea id="headerOutput" class="form-control" readonly placeholder="Header will appear here..."></textarea>
                         </div>
                         <div class="mb-2">
-                            <label for="payloadOutput" class="form-label fw-bold mb-1">Payload:</label>
-                            <textarea id="payloadOutput" class="form-control" readonly placeholder="Payload will appear here..."></textarea>
+                            <label for="payloadOutput" class="form-label fw-bold mb-1">
+                                <span id="payloadLabel">Payload:</span>
+                                <small class="text-muted">(editable - JWT updates automatically)</small>
+                            </label>
+                            <textarea 
+                                id="payloadOutput" 
+                                class="form-control" 
+                                placeholder="Payload will appear here..."
+                                oninput="onPayloadEdit()"
+                            ></textarea>
                         </div>
                         <div>
                             <label for="signatureOutput" class="form-label fw-bold mb-1">Signature:</label>
@@ -298,6 +317,168 @@
             }
         }
         
+        // Base64URL encoding/decoding utilities
+        function base64urlEncode(str) {
+            return btoa(str)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+        
+        function base64urlDecode(str) {
+            // Add padding
+            str += '='.repeat((4 - str.length % 4) % 4);
+            return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+        }
+        
+        let isUpdatingFromPayloadEdit = false;
+        
+        async function regenerateJWT(header, payload, secret) {
+            try {
+                const encodedHeader = base64urlEncode(JSON.stringify(header));
+                const encodedPayload = base64urlEncode(JSON.stringify(payload));
+                const signingInput = `${encodedHeader}.${encodedPayload}`;
+                
+                if (!secret || !header.alg || !header.alg.startsWith('HS')) {
+                    // Return unsigned token
+                    return `${encodedHeader}.${encodedPayload}.`;
+                }
+                
+                // Get the hash algorithm
+                let hashAlgorithm;
+                switch (header.alg) {
+                    case 'HS256': hashAlgorithm = 'SHA-256'; break;
+                    case 'HS384': hashAlgorithm = 'SHA-384'; break;
+                    case 'HS512': hashAlgorithm = 'SHA-512'; break;
+                    default:
+                        return `${encodedHeader}.${encodedPayload}.UNSUPPORTED_ALG`;
+                }
+                
+                // Convert secret to Uint8Array
+                const encoder = new TextEncoder();
+                const keyData = encoder.encode(secret);
+                
+                // Import the key
+                const key = await crypto.subtle.importKey(
+                    'raw',
+                    keyData,
+                    { name: 'HMAC', hash: hashAlgorithm },
+                    false,
+                    ['sign']
+                );
+                
+                // Sign the input
+                const signatureArrayBuffer = await crypto.subtle.sign(
+                    'HMAC',
+                    key,
+                    encoder.encode(signingInput)
+                );
+                
+                // Convert to base64url
+                const signatureArray = new Uint8Array(signatureArrayBuffer);
+                const signature = btoa(String.fromCharCode(...signatureArray))
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_')
+                    .replace(/=/g, '');
+                
+                return `${encodedHeader}.${encodedPayload}.${signature}`;
+                
+            } catch (error) {
+                console.error('JWT regeneration error:', error);
+                // Return unsigned token as fallback
+                const encodedHeader = base64urlEncode(JSON.stringify(header));
+                const encodedPayload = base64urlEncode(JSON.stringify(payload));
+                return `${encodedHeader}.${encodedPayload}.ERROR`;
+            }
+        }
+        
+        function onPayloadEdit() {
+            const payloadOutput = document.getElementById('payloadOutput');
+            const tokenInput = document.getElementById('tokenInput');
+            const secretKey = document.getElementById('secretKey').value.trim();
+            
+            // Prevent infinite loop
+            if (isUpdatingFromPayloadEdit) return;
+            
+            // Store cursor position and focus state
+            const cursorPosition = payloadOutput.selectionStart;
+            const hadFocus = document.activeElement === payloadOutput;
+            
+            try {
+                // Parse the edited payload
+                const editedPayload = JSON.parse(payloadOutput.value);
+                
+                // Get current token to extract header
+                const currentToken = getPlainText(tokenInput).replace(/^Bearer\s+/i, '').trim();
+                if (!currentToken) return;
+                
+                const parts = currentToken.split('.');
+                if (parts.length !== 3) return;
+                
+                // Decode current header
+                const header = JSON.parse(base64urlDecode(parts[0]));
+                
+                // Regenerate JWT with new payload
+                regenerateJWT(header, editedPayload, secretKey)
+                    .then(newToken => {
+                        isUpdatingFromPayloadEdit = true;
+                        
+                        // Update token input
+                        tokenInput.textContent = newToken;
+                        updateInputHighlighting(tokenInput, newToken);
+                        
+                        // Update other outputs (but not the payload that's being edited)
+                        const result = decodeJWT(newToken);
+                        document.getElementById('headerOutput').value = JSON.stringify(result.header, null, 2);
+                        document.getElementById('signatureOutput').value = result.signature;
+                        
+                        // Update formatted displays if they exist (but avoid touching payload area)
+                        const headerFormatted = document.getElementById('headerFormatted');
+                        if (headerFormatted) {
+                            headerFormatted.innerHTML = formatTimestampValue(result.header);
+                        }
+                        
+                        // Update verification status
+                        if (secretKey && !result.error) {
+                            verifySignature(result.header, result.payload, result.signature, secretKey)
+                                .then(verificationResult => {
+                                    updateVerificationStatus(verificationResult);
+                                });
+                        }
+                        
+                        // Add timestamp tooltips only to header
+                        setTimeout(() => {
+                            document.querySelectorAll('#headerFormatted .timestamp-value').forEach(element => {
+                                element.addEventListener('mouseenter', showTooltip);
+                                element.addEventListener('mouseleave', hideTooltip);
+                            });
+                        }, 0);
+                        
+                        // Restore cursor position and focus
+                        if (hadFocus) {
+                            payloadOutput.focus();
+                            payloadOutput.setSelectionRange(cursorPosition, cursorPosition);
+                        }
+                        
+                        isUpdatingFromPayloadEdit = false;
+                    })
+                    .catch(error => {
+                        console.error('Error regenerating JWT:', error);
+                        isUpdatingFromPayloadEdit = false;
+                        
+                        // Restore focus even on error
+                        if (hadFocus) {
+                            payloadOutput.focus();
+                            payloadOutput.setSelectionRange(cursorPosition, cursorPosition);
+                        }
+                    });
+                    
+            } catch (error) {
+                // Invalid JSON - don't update anything, just let user continue editing
+                console.log('Invalid JSON in payload editor:', error.message);
+            }
+        }
+        
         async function verifySignature(header, payload, signature, secret) {
             if (!secret || !signature) {
                 return { verified: null, message: 'No secret key provided' };
@@ -370,7 +551,12 @@
         
         function decodeTokenOnChange() {
             const tokenInput = document.getElementById('tokenInput');
+            const secretKeyInput = document.getElementById('secretKey');
             const token = getPlainText(tokenInput).trim();
+            
+            // Store focus state and cursor position for secret key field
+            const secretKeyHadFocus = document.activeElement === secretKeyInput;
+            const secretKeyCursorPosition = secretKeyHadFocus ? secretKeyInput.selectionStart : 0;
             
             // Update input highlighting
             updateInputHighlighting(tokenInput, token);
@@ -384,17 +570,41 @@
             showResult(result);
             
             // Perform signature verification if secret is provided
-            const secretKey = document.getElementById('secretKey').value.trim();
+            const secretKey = secretKeyInput.value.trim();
             if (secretKey && !result.error) {
                 verifySignature(result.header, result.payload, result.signature, secretKey)
                     .then(verificationResult => {
                         updateVerificationStatus(verificationResult);
+                        
+                        // Restore focus and cursor position for secret key field
+                        if (secretKeyHadFocus) {
+                            setTimeout(() => {
+                                secretKeyInput.focus();
+                                secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
+                            }, 0);
+                        }
                     })
                     .catch(error => {
                         updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                        
+                        // Restore focus and cursor position for secret key field
+                        if (secretKeyHadFocus) {
+                            setTimeout(() => {
+                                secretKeyInput.focus();
+                                secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
+                            }, 0);
+                        }
                     });
             } else {
                 updateVerificationStatus({ verified: null, message: secretKey ? 'Invalid token format' : 'Enter secret key to verify signature' });
+                
+                // Restore focus and cursor position for secret key field
+                if (secretKeyHadFocus) {
+                    setTimeout(() => {
+                        secretKeyInput.focus();
+                        secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
+                    }, 0);
+                }
             }
         }
         
@@ -528,13 +738,19 @@
                 const headerFormatted = formatTimestampValue(result.header);
                 const payloadFormatted = formatTimestampValue(result.payload);
                 
-                // Create wrapper divs to hold formatted content
-                headerOutput.style.display = 'none';
-                payloadOutput.style.display = 'none';
+                // Only update payload if not currently being edited
+                if (!isUpdatingFromPayloadEdit) {
+                    payloadOutput.value = JSON.stringify(result.payload, null, 2);
+                    payloadOutput.readOnly = false;
+                    payloadOutput.className = 'form-control jwt-payload payload-editable';
+                    document.getElementById('payloadLabel').className = 'payload-editor-label';
+                }
                 
-                // Create or update formatted display divs
+                // Create wrapper divs to hold formatted content for header only
+                headerOutput.style.display = 'none';
+                
+                // Create or update formatted display div for header
                 let headerDiv = document.getElementById('headerFormatted');
-                let payloadDiv = document.getElementById('payloadFormatted');
                 
                 if (!headerDiv) {
                     headerDiv = document.createElement('pre');
@@ -546,18 +762,10 @@
                     headerOutput.parentNode.insertBefore(headerDiv, headerOutput.nextSibling);
                 }
                 
-                if (!payloadDiv) {
-                    payloadDiv = document.createElement('pre');
-                    payloadDiv.id = 'payloadFormatted';
-                    payloadDiv.className = 'form-control jwt-payload';
-                    payloadDiv.style.height = payloadOutput.style.height;
-                    payloadDiv.style.minHeight = payloadOutput.style.minHeight;
-                    payloadDiv.style.maxHeight = payloadOutput.style.maxHeight;
-                    payloadOutput.parentNode.insertBefore(payloadDiv, payloadOutput.nextSibling);
-                }
-                
                 headerDiv.innerHTML = headerFormatted;
-                payloadDiv.innerHTML = payloadFormatted;
+                
+                // Update header textarea (hidden)
+                headerOutput.value = JSON.stringify(result.header, null, 2);
                 signatureOutput.value = result.signature;
                 
                 // Add color coding styling
@@ -644,9 +852,14 @@
             statusDiv.style.display = 'none';
             statusDiv.textContent = '';
             
+            // Reset payload editing state
+            const payloadOutput = document.getElementById('payloadOutput');
+            payloadOutput.readOnly = true;
+            document.getElementById('payloadLabel').className = '';
+            
             // Reset styling
             document.getElementById('headerOutput').className = 'form-control';
-            document.getElementById('payloadOutput').className = 'form-control';
+            payloadOutput.className = 'form-control';
             document.getElementById('signatureOutput').className = 'form-control';
         }
         
