@@ -567,14 +567,41 @@
             }
             
             const result = decodeJWT(token);
-            showResult(result);
-            
-            // Perform signature verification if secret is provided
             const secretKey = secretKeyInput.value.trim();
-            if (secretKey && !result.error) {
-                verifySignature(result.header, result.payload, result.signature, secretKey)
-                    .then(verificationResult => {
-                        updateVerificationStatus(verificationResult);
+            
+            // If we have a secret key and valid token, regenerate JWT with proper signature
+            if (secretKey && !result.error && result.header.alg && result.header.alg.startsWith('HS')) {
+                regenerateJWT(result.header, result.payload, secretKey)
+                    .then(newToken => {
+                        // Only update if the token actually changed (to avoid infinite loops)
+                        const currentDisplayToken = getPlainText(tokenInput);
+                        if (newToken !== currentDisplayToken) {
+                            tokenInput.textContent = newToken;
+                            updateInputHighlighting(tokenInput, newToken);
+                            
+                            // Update the result with the new token
+                            const newResult = decodeJWT(newToken);
+                            showResult(newResult);
+                            
+                            // Verify the new signature
+                            verifySignature(newResult.header, newResult.payload, newResult.signature, secretKey)
+                                .then(verificationResult => {
+                                    updateVerificationStatus(verificationResult);
+                                })
+                                .catch(error => {
+                                    updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                                });
+                        } else {
+                            // Token didn't change, just show result and verify
+                            showResult(result);
+                            verifySignature(result.header, result.payload, result.signature, secretKey)
+                                .then(verificationResult => {
+                                    updateVerificationStatus(verificationResult);
+                                })
+                                .catch(error => {
+                                    updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                                });
+                        }
                         
                         // Restore focus and cursor position for secret key field
                         if (secretKeyHadFocus) {
@@ -585,7 +612,10 @@
                         }
                     })
                     .catch(error => {
-                        updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                        console.error('Error regenerating JWT with secret:', error);
+                        // Fallback to showing original result
+                        showResult(result);
+                        updateVerificationStatus({ verified: false, message: `JWT regeneration error: ${error.message}` });
                         
                         // Restore focus and cursor position for secret key field
                         if (secretKeyHadFocus) {
@@ -596,7 +626,20 @@
                         }
                     });
             } else {
-                updateVerificationStatus({ verified: null, message: secretKey ? 'Invalid token format' : 'Enter secret key to verify signature' });
+                // No secret key or invalid token, just show result and verify if possible
+                showResult(result);
+                
+                if (secretKey && !result.error) {
+                    verifySignature(result.header, result.payload, result.signature, secretKey)
+                        .then(verificationResult => {
+                            updateVerificationStatus(verificationResult);
+                        })
+                        .catch(error => {
+                            updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                        });
+                } else {
+                    updateVerificationStatus({ verified: null, message: secretKey ? 'Invalid token format' : 'Enter secret key to verify signature' });
+                }
                 
                 // Restore focus and cursor position for secret key field
                 if (secretKeyHadFocus) {
