@@ -2,11 +2,137 @@
 <html>
 <head>
     <title>Bearer Token Reader</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            flex-shrink: 0;
+        }
+        .content {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            min-height: 0;
+        }
+        .input-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .output-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+            flex-shrink: 0;
+        }
+        textarea {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            resize: none;
+            box-sizing: border-box;
+            min-height: 200px;
+        }
+        textarea:focus {
+            border-color: #007cba;
+            outline: none;
+        }
+        .result {
+            flex: 1;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #007cba;
+            overflow-y: auto;
+            min-height: 200px;
+            box-sizing: border-box;
+        }
+        .result.empty {
+            background-color: #f9f9f9;
+            border-left-color: #ddd;
+            color: #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-style: italic;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+            }
+            .container {
+                height: auto;
+                min-height: calc(100vh - 40px);
+            }
+        }
+    </style>
 </head>
 <body>
+    <div class="container">
+        <h1>JWT Bearer Token Decoder</h1>
+        
+        <div class="content">
+            <div class="input-section">
+                <label for="tokenInput">Paste your Bearer Token (JWT):</label>
+                <textarea 
+                    id="tokenInput" 
+                    placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)"
+                    oninput="decodeTokenOnChange()"
+                ></textarea>
+            </div>
+            
+            <div class="output-section">
+                <label>Decoded JWT:</label>
+                <div id="result" class="result empty">Enter a JWT token to see the decoded content</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function decodeJWT(token) {
             try {
+                // Remove "Bearer " prefix if present
+                token = token.replace(/^Bearer\s+/i, '').trim();
+                
                 const parts = token.split('.');
                 
                 if (parts.length !== 3) {
@@ -37,39 +163,40 @@
             }
         }
         
-        function getBearerTokenFromURL() {
+        function decodeTokenOnChange() {
+            const tokenInput = document.getElementById('tokenInput');
+            const resultDiv = document.getElementById('result');
+            const token = tokenInput.value.trim();
+            
+            if (!token) {
+                resultDiv.className = 'result empty';
+                resultDiv.innerHTML = 'Enter a JWT token to see the decoded content';
+                return;
+            }
+            
+            const result = decodeJWT(token);
+            showResult(result, result.error);
+        }
+        
+        function showResult(result, isError = false) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result' + (isError ? ' error' : '');
+            resultDiv.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+        }
+        
+        // Check for URL parameter on load (backward compatibility)
+        window.addEventListener('load', function() {
             const urlParams = new URLSearchParams(window.location.search);
             const bearerToken = urlParams.get('bearer');
             
-            let result;
-            
             if (bearerToken) {
-                result = decodeJWT(bearerToken);
-            } else {
-                result = {
-                    error: true,
-                    message: "No bearer token provided",
-                    usage: "Add ?bearer=your_jwt_token to the URL",
-                    examples: [
-                        "?bearer=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                        "?bearer=your_jwt_token&format=json (for raw JSON output)"
-                    ]
-                };
+                document.getElementById('tokenInput').value = bearerToken;
+                decodeTokenOnChange();
             }
             
-            // Support different output formats for API testing
-            if (urlParams.get('format') === 'json') {
-                // Raw JSON output (better for API testing)
-                document.body.innerHTML = JSON.stringify(result);
-                document.body.style.fontFamily = 'monospace';
-                document.body.style.whiteSpace = 'pre';
-            } else {
-                // Pretty formatted output (better for human reading)
-                document.body.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
-            }
-        }
-        
-        window.addEventListener('load', getBearerTokenFromURL);
+            // Focus on the textarea
+            document.getElementById('tokenInput').focus();
+        });
     </script>
 </body>
 </html>
