@@ -573,57 +573,31 @@
             if (secretKey && !result.error && result.header.alg && result.header.alg.startsWith('HS')) {
                 regenerateJWT(result.header, result.payload, secretKey)
                     .then(newToken => {
-                        // Only update if the token actually changed (to avoid infinite loops)
-                        const currentDisplayToken = getPlainText(tokenInput);
-                        if (newToken !== currentDisplayToken) {
-                            tokenInput.textContent = newToken;
-                            updateInputHighlighting(tokenInput, newToken);
-                            
-                            // Update the result with the new token
-                            const newResult = decodeJWT(newToken);
-                            showResult(newResult);
-                            
-                            // Verify the new signature
-                            verifySignature(newResult.header, newResult.payload, newResult.signature, secretKey)
-                                .then(verificationResult => {
-                                    updateVerificationStatus(verificationResult);
-                                })
-                                .catch(error => {
-                                    updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
-                                });
-                        } else {
-                            // Token didn't change, just show result and verify
-                            showResult(result);
-                            verifySignature(result.header, result.payload, result.signature, secretKey)
-                                .then(verificationResult => {
-                                    updateVerificationStatus(verificationResult);
-                                })
-                                .catch(error => {
-                                    updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
-                                });
-                        }
+                        // Always update the token when we have a secret key (signature will be different)
+                        tokenInput.textContent = newToken;
+                        updateInputHighlighting(tokenInput, newToken);
                         
-                        // Restore focus and cursor position for secret key field
-                        if (secretKeyHadFocus) {
-                            setTimeout(() => {
-                                secretKeyInput.focus();
-                                secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
-                            }, 0);
-                        }
+                        // Update the result with the new token
+                        const newResult = decodeJWT(newToken);
+                        showResult(newResult);
+                        
+                        // Verify the new signature
+                        verifySignature(newResult.header, newResult.payload, newResult.signature, secretKey)
+                            .then(verificationResult => {
+                                updateVerificationStatus(verificationResult);
+                                restoreFocus();
+                            })
+                            .catch(error => {
+                                updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                                restoreFocus();
+                            });
                     })
                     .catch(error => {
                         console.error('Error regenerating JWT with secret:', error);
                         // Fallback to showing original result
                         showResult(result);
                         updateVerificationStatus({ verified: false, message: `JWT regeneration error: ${error.message}` });
-                        
-                        // Restore focus and cursor position for secret key field
-                        if (secretKeyHadFocus) {
-                            setTimeout(() => {
-                                secretKeyInput.focus();
-                                secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
-                            }, 0);
-                        }
+                        restoreFocus();
                     });
             } else {
                 // No secret key or invalid token, just show result and verify if possible
