@@ -15,6 +15,8 @@
         }
         #tokenInput {
             font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
             min-height: 400px;
             resize: none;
         }
@@ -43,6 +45,42 @@
             background-color: #f8d7da !important;
             border-color: #dc3545 !important;
         }
+        
+        /* JWT Color coding */
+        .jwt-header {
+            background-color: #e3f2fd !important;
+            border-left: 4px solid #2196f3 !important;
+        }
+        .jwt-payload {
+            background-color: #f3e5f5 !important;
+            border-left: 4px solid #9c27b0 !important;
+        }
+        .jwt-signature {
+            background-color: #e8f5e8 !important;
+            border-left: 4px solid #4caf50 !important;
+        }
+        
+        /* Contenteditable input styling */
+        .jwt-input {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            min-height: 400px;
+            resize: none;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-y: auto;
+            outline: none;
+        }
+        .jwt-input:empty::before {
+            content: attr(data-placeholder);
+            color: #6c757d;
+            pointer-events: none;
+        }
+        .jwt-part-1 { color: #2196f3; }
+        .jwt-part-2 { color: #9c27b0; }
+        .jwt-part-3 { color: #4caf50; }
+        .jwt-dot { color: #666; }
         pre {
             font-size: 0.875rem;
             margin: 0;
@@ -61,12 +99,14 @@
                 <div class="row flex-grow-1 g-3">
                     <div class="col-lg-6 d-flex flex-column">
                         <label for="tokenInput" class="form-label fw-bold">Paste your Bearer Token (JWT):</label>
-                        <textarea 
+                        <div 
                             id="tokenInput" 
-                            class="form-control flex-grow-1"
-                            placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)"
+                            class="form-control jwt-input flex-grow-1"
+                            contenteditable="true"
+                            data-placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)"
                             oninput="decodeTokenOnChange()"
-                        ></textarea>
+                            onpaste="handlePaste(event)"
+                        ></div>
                     </div>
                     
                     <div class="col-lg-6 output-column">
@@ -126,10 +166,10 @@
         
         function decodeTokenOnChange() {
             const tokenInput = document.getElementById('tokenInput');
-            const headerOutput = document.getElementById('headerOutput');
-            const payloadOutput = document.getElementById('payloadOutput');
-            const signatureOutput = document.getElementById('signatureOutput');
-            const token = tokenInput.value.trim();
+            const token = getPlainText(tokenInput).trim();
+            
+            // Update input highlighting
+            updateInputHighlighting(tokenInput, token);
             
             if (!token) {
                 clearOutputs();
@@ -138,6 +178,112 @@
             
             const result = decodeJWT(token);
             showResult(result);
+        }
+        
+        function getPlainText(element) {
+            return element.textContent || element.innerText || '';
+        }
+        
+        function updateInputHighlighting(element, token) {
+            if (!token) {
+                element.innerHTML = '';
+                return;
+            }
+            
+            // Store cursor position
+            const selection = window.getSelection();
+            const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+            const cursorPos = range ? range.startOffset : 0;
+            
+            // Remove "Bearer " prefix if present for highlighting
+            const cleanToken = token.replace(/^Bearer\s+/i, '').trim();
+            const parts = cleanToken.split('.');
+            
+            if (parts.length === 3) {
+                // Escape HTML in each part to prevent XSS
+                const escapedParts = parts.map(part => 
+                    part.replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;')
+                );
+                
+                // Create highlighted version
+                const highlighted = 
+                    `<span class="jwt-part-1">${escapedParts[0]}</span>` +
+                    `<span class="jwt-dot">.</span>` +
+                    `<span class="jwt-part-2">${escapedParts[1]}</span>` +
+                    `<span class="jwt-dot">.</span>` +
+                    `<span class="jwt-part-3">${escapedParts[2]}</span>`;
+                
+                // Add Bearer prefix back if it was present
+                const bearerPrefix = token.match(/^Bearer\s+/i);
+                element.innerHTML = bearerPrefix ? bearerPrefix[0] + highlighted : highlighted;
+            } else {
+                // If not a valid JWT format, just show the text without highlighting
+                element.innerHTML = token.replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+            
+            // Restore cursor position
+            restoreCursor(element, cursorPos);
+        }
+        
+        function restoreCursor(element, position) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            
+            try {
+                // Find the text node and position
+                const walker = document.createTreeWalker(
+                    element,
+                    NodeFilter.SHOW_TEXT,
+                    null,
+                    false
+                );
+                
+                let currentPos = 0;
+                let node;
+                
+                while (node = walker.nextNode()) {
+                    const nodeLength = node.textContent.length;
+                    if (currentPos + nodeLength >= position) {
+                        range.setStart(node, position - currentPos);
+                        range.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        break;
+                    }
+                    currentPos += nodeLength;
+                }
+            } catch (e) {
+                // If cursor restoration fails, place at end
+                range.selectNodeContents(element);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+        
+        function handlePaste(event) {
+            event.preventDefault();
+            const text = (event.clipboardData || window.clipboardData).getData('text');
+            
+            // Insert plain text without formatting
+            const selection = window.getSelection();
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            
+            // Trigger the decode function
+            decodeTokenOnChange();
         }
         
         function showResult(result) {
@@ -157,15 +303,15 @@
                 payloadOutput.className = 'form-control flex-grow-1';
                 signatureOutput.className = 'form-control';
             } else {
-                // Show decoded parts
+                // Show decoded parts with color coding
                 headerOutput.value = JSON.stringify(result.header, null, 2);
                 payloadOutput.value = JSON.stringify(result.payload, null, 2);
                 signatureOutput.value = result.signature;
                 
-                // Remove error styling
-                headerOutput.className = 'form-control';
-                payloadOutput.className = 'form-control';
-                signatureOutput.className = 'form-control';
+                // Add color coding styling
+                headerOutput.className = 'form-control jwt-header';
+                payloadOutput.className = 'form-control jwt-payload';
+                signatureOutput.className = 'form-control jwt-signature';
             }
         }
         
@@ -173,6 +319,7 @@
             document.getElementById('headerOutput').value = '';
             document.getElementById('payloadOutput').value = '';
             document.getElementById('signatureOutput').value = '';
+            document.getElementById('tokenInput').innerHTML = '';
             
             // Reset styling
             document.getElementById('headerOutput').className = 'form-control';
