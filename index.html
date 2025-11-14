@@ -569,6 +569,16 @@
             const result = decodeJWT(token);
             const secretKey = secretKeyInput.value.trim();
             
+            // Function to restore focus after all operations complete
+            const restoreFocus = () => {
+                if (secretKeyHadFocus) {
+                    setTimeout(() => {
+                        secretKeyInput.focus();
+                        secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
+                    }, 0);
+                }
+            };
+            
             // If we have a secret key and valid token, regenerate JWT with proper signature
             if (secretKey && !result.error && result.header.alg && result.header.alg.startsWith('HS')) {
                 regenerateJWT(result.header, result.payload, secretKey)
@@ -607,21 +617,17 @@
                     verifySignature(result.header, result.payload, result.signature, secretKey)
                         .then(verificationResult => {
                             updateVerificationStatus(verificationResult);
+                            restoreFocus();
                         })
                         .catch(error => {
                             updateVerificationStatus({ verified: false, message: `Verification error: ${error.message}` });
+                            restoreFocus();
                         });
                 } else {
                     updateVerificationStatus({ verified: null, message: secretKey ? 'Invalid token format' : 'Enter secret key to verify signature' });
                 }
                 
-                // Restore focus and cursor position for secret key field
-                if (secretKeyHadFocus) {
-                    setTimeout(() => {
-                        secretKeyInput.focus();
-                        secretKeyInput.setSelectionRange(secretKeyCursorPosition, secretKeyCursorPosition);
-                    }, 0);
-                }
+                restoreFocus();
             }
         }
         
