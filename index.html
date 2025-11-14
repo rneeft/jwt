@@ -88,6 +88,44 @@
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
+        
+        /* Timestamp styling */
+        .timestamp-value {
+            color: #0066cc;
+            cursor: help;
+            text-decoration: underline;
+            text-decoration-style: dotted;
+        }
+        
+        .timestamp-tooltip {
+            position: absolute;
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            z-index: 1000;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .timestamp-tooltip.show {
+            opacity: 1;
+        }
+        
+        .timestamp-tooltip::before {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent;
+        }
     </style>
 </head>
 <body>
@@ -161,6 +199,58 @@
                     message: error.message,
                     raw_token: token.substring(0, 50) + '...' // Show first 50 chars for debugging
                 };
+            }
+        }
+        
+        function formatTimestampValue(obj, indent = 0) {
+            const timestampFields = ['iat', 'exp', 'nbf', 'auth_time', 'updated_at'];
+            const indentStr = '  '.repeat(indent);
+            
+            if (typeof obj !== 'object' || obj === null) {
+                return JSON.stringify(obj);
+            }
+            
+            if (Array.isArray(obj)) {
+                const items = obj.map(item => formatTimestampValue(item, indent + 1)).join(',\n');
+                return `[\n${items}\n${indentStr}]`;
+            }
+            
+            const entries = Object.entries(obj).map(([key, value]) => {
+                const valueIndent = '  '.repeat(indent + 1);
+                let formattedValue;
+                
+                if (timestampFields.includes(key) && typeof value === 'number' && value > 1000000000 && value < 9999999999) {
+                    // This looks like a Unix timestamp
+                    const date = new Date(value * 1000);
+                    const dateStr = date.toISOString();
+                    const relativeTime = getRelativeTime(date);
+                    formattedValue = `<span class="timestamp-value" data-timestamp="${value}" data-date="${dateStr}" data-relative="${relativeTime}">${value}</span>`;
+                } else {
+                    formattedValue = formatTimestampValue(value, indent + 1);
+                }
+                
+                return `${valueIndent}"${key}": ${formattedValue}`;
+            }).join(',\n');
+            
+            return `{\n${entries}\n${indentStr}}`;
+        }
+        
+        function getRelativeTime(date) {
+            const now = new Date();
+            const diffMs = date.getTime() - now.getTime();
+            const diffSeconds = Math.floor(diffMs / 1000);
+            const diffMinutes = Math.floor(diffSeconds / 60);
+            const diffHours = Math.floor(diffMinutes / 60);
+            const diffDays = Math.floor(diffHours / 24);
+            
+            if (Math.abs(diffSeconds) < 60) {
+                return diffSeconds === 0 ? 'now' : (diffSeconds > 0 ? `in ${diffSeconds}s` : `${Math.abs(diffSeconds)}s ago`);
+            } else if (Math.abs(diffMinutes) < 60) {
+                return diffMinutes > 0 ? `in ${diffMinutes}m` : `${Math.abs(diffMinutes)}m ago`;
+            } else if (Math.abs(diffHours) < 24) {
+                return diffHours > 0 ? `in ${diffHours}h` : `${Math.abs(diffHours)}h ago`;
+            } else {
+                return diffDays > 0 ? `in ${diffDays}d` : `${Math.abs(diffDays)}d ago`;
             }
         }
         
@@ -291,6 +381,9 @@
             const payloadOutput = document.getElementById('payloadOutput');
             const signatureOutput = document.getElementById('signatureOutput');
             
+            // Remove any existing tooltips
+            document.querySelectorAll('.timestamp-tooltip').forEach(tooltip => tooltip.remove());
+            
             if (result.error) {
                 // Show error in all textareas
                 const errorText = JSON.stringify(result, null, 2);
@@ -303,16 +396,82 @@
                 payloadOutput.className = 'form-control flex-grow-1';
                 signatureOutput.className = 'form-control';
             } else {
-                // Show decoded parts with color coding
-                headerOutput.value = JSON.stringify(result.header, null, 2);
-                payloadOutput.value = JSON.stringify(result.payload, null, 2);
+                // Show decoded parts with color coding and timestamp formatting
+                const headerFormatted = formatTimestampValue(result.header);
+                const payloadFormatted = formatTimestampValue(result.payload);
+                
+                // Create wrapper divs to hold formatted content
+                headerOutput.style.display = 'none';
+                payloadOutput.style.display = 'none';
+                
+                // Create or update formatted display divs
+                let headerDiv = document.getElementById('headerFormatted');
+                let payloadDiv = document.getElementById('payloadFormatted');
+                
+                if (!headerDiv) {
+                    headerDiv = document.createElement('pre');
+                    headerDiv.id = 'headerFormatted';
+                    headerDiv.className = 'form-control jwt-header';
+                    headerDiv.style.height = headerOutput.style.height;
+                    headerDiv.style.minHeight = headerOutput.style.minHeight;
+                    headerDiv.style.maxHeight = headerOutput.style.maxHeight;
+                    headerOutput.parentNode.insertBefore(headerDiv, headerOutput.nextSibling);
+                }
+                
+                if (!payloadDiv) {
+                    payloadDiv = document.createElement('pre');
+                    payloadDiv.id = 'payloadFormatted';
+                    payloadDiv.className = 'form-control jwt-payload';
+                    payloadDiv.style.height = payloadOutput.style.height;
+                    payloadDiv.style.minHeight = payloadOutput.style.minHeight;
+                    payloadDiv.style.maxHeight = payloadOutput.style.maxHeight;
+                    payloadOutput.parentNode.insertBefore(payloadDiv, payloadOutput.nextSibling);
+                }
+                
+                headerDiv.innerHTML = headerFormatted;
+                payloadDiv.innerHTML = payloadFormatted;
                 signatureOutput.value = result.signature;
                 
                 // Add color coding styling
-                headerOutput.className = 'form-control jwt-header';
-                payloadOutput.className = 'form-control jwt-payload';
                 signatureOutput.className = 'form-control jwt-signature';
+                
+                // Add event listeners for timestamp tooltips
+                addTimestampTooltips();
             }
+        }
+        
+        function addTimestampTooltips() {
+            document.querySelectorAll('.timestamp-value').forEach(element => {
+                element.addEventListener('mouseenter', showTooltip);
+                element.addEventListener('mouseleave', hideTooltip);
+            });
+        }
+        
+        function showTooltip(event) {
+            const element = event.target;
+            const timestamp = element.dataset.timestamp;
+            const date = element.dataset.date;
+            const relative = element.dataset.relative;
+            
+            const tooltip = document.createElement('div');
+            tooltip.className = 'timestamp-tooltip';
+            tooltip.innerHTML = `<strong>${new Date(parseInt(timestamp) * 1000).toLocaleString()}</strong><br>${relative}<br><small>UTC: ${date}</small>`;
+            
+            document.body.appendChild(tooltip);
+            
+            const rect = element.getBoundingClientRect();
+            tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+            tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + 'px';
+            
+            // Show tooltip with animation
+            setTimeout(() => tooltip.classList.add('show'), 10);
+        }
+        
+        function hideTooltip(event) {
+            document.querySelectorAll('.timestamp-tooltip').forEach(tooltip => {
+                tooltip.classList.remove('show');
+                setTimeout(() => tooltip.remove(), 200);
+            });
         }
         
         function clearOutputs() {
@@ -320,6 +479,19 @@
             document.getElementById('payloadOutput').value = '';
             document.getElementById('signatureOutput').value = '';
             document.getElementById('tokenInput').innerHTML = '';
+            
+            // Clear formatted divs if they exist
+            const headerFormatted = document.getElementById('headerFormatted');
+            const payloadFormatted = document.getElementById('payloadFormatted');
+            if (headerFormatted) headerFormatted.innerHTML = '';
+            if (payloadFormatted) payloadFormatted.innerHTML = '';
+            
+            // Show original textareas
+            document.getElementById('headerOutput').style.display = 'block';
+            document.getElementById('payloadOutput').style.display = 'block';
+            
+            // Remove any tooltips
+            document.querySelectorAll('.timestamp-tooltip').forEach(tooltip => tooltip.remove());
             
             // Reset styling
             document.getElementById('headerOutput').className = 'form-control';
