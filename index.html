@@ -5,24 +5,43 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         .jwt-container {
-            min-height: calc(100vh - 2rem);
+            height: calc(100vh - 2rem);
+            overflow: hidden;
         }
-        .result-area {
-            border-left: 4px solid #0d6efd;
-            overflow-y: auto;
-            min-height: 400px;
+        .output-column {
+            height: calc(100vh - 12rem);
+            display: flex;
+            flex-direction: column;
         }
-        .result-area.empty {
-            border-left-color: #dee2e6;
-            color: #6c757d;
-        }
-        .result-area.error {
-            border-left-color: #dc3545;
-        }
-        textarea {
+        #tokenInput {
             font-family: 'Courier New', monospace;
             min-height: 400px;
             resize: none;
+        }
+        #headerOutput, #payloadOutput, #signatureOutput {
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            resize: vertical;
+            background-color: #f8f9fa;
+        }
+        #headerOutput {
+            height: calc((100vh - 12rem) * 0.2 - 2rem);
+            min-height: calc((100vh - 12rem) * 0.2 - 2rem);
+            max-height: calc((100vh - 12rem) * 0.2 - 2rem);
+        }
+        #payloadOutput {
+            height: calc((100vh - 12rem) * 0.6 - 2rem);
+            min-height: calc((100vh - 12rem) * 0.6 - 2rem);
+            max-height: calc((100vh - 12rem) * 0.6 - 2rem);
+        }
+        #signatureOutput {
+            height: calc((100vh - 12rem) * 0.2 - 2rem);
+            min-height: calc((100vh - 12rem) * 0.2 - 2rem);
+            max-height: calc((100vh - 12rem) * 0.2 - 2rem);
+        }
+        .error-output {
+            background-color: #f8d7da !important;
+            border-color: #dc3545 !important;
         }
         pre {
             font-size: 0.875rem;
@@ -50,10 +69,18 @@
                         ></textarea>
                     </div>
                     
-                    <div class="col-lg-6 d-flex flex-column">
-                        <label class="form-label fw-bold">Decoded JWT:</label>
-                        <div id="result" class="bg-light p-3 rounded result-area empty d-flex align-items-center justify-content-center fst-italic flex-grow-1">
-                            Enter a JWT token to see the decoded content
+                    <div class="col-lg-6 output-column">
+                        <div class="mb-2">
+                            <label for="headerOutput" class="form-label fw-bold mb-1">Header:</label>
+                            <textarea id="headerOutput" class="form-control" readonly placeholder="Header will appear here..."></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label for="payloadOutput" class="form-label fw-bold mb-1">Payload:</label>
+                            <textarea id="payloadOutput" class="form-control" readonly placeholder="Payload will appear here..."></textarea>
+                        </div>
+                        <div>
+                            <label for="signatureOutput" class="form-label fw-bold mb-1">Signature:</label>
+                            <textarea id="signatureOutput" class="form-control" readonly placeholder="Signature will appear here..."></textarea>
                         </div>
                     </div>
                 </div>
@@ -99,24 +126,58 @@
         
         function decodeTokenOnChange() {
             const tokenInput = document.getElementById('tokenInput');
-            const resultDiv = document.getElementById('result');
+            const headerOutput = document.getElementById('headerOutput');
+            const payloadOutput = document.getElementById('payloadOutput');
+            const signatureOutput = document.getElementById('signatureOutput');
             const token = tokenInput.value.trim();
             
             if (!token) {
-                resultDiv.className = 'bg-light p-3 rounded result-area empty d-flex align-items-center justify-content-center fst-italic flex-grow-1';
-                resultDiv.innerHTML = 'Enter a JWT token to see the decoded content';
+                clearOutputs();
                 return;
             }
             
             const result = decodeJWT(token);
-            showResult(result, result.error);
+            showResult(result);
         }
         
-        function showResult(result, isError = false) {
-            const resultDiv = document.getElementById('result');
-            const baseClasses = 'bg-light p-3 rounded result-area flex-grow-1';
-            resultDiv.className = baseClasses + (isError ? ' error bg-danger-subtle' : '');
-            resultDiv.innerHTML = '<pre class="text-start">' + JSON.stringify(result, null, 2) + '</pre>';
+        function showResult(result) {
+            const headerOutput = document.getElementById('headerOutput');
+            const payloadOutput = document.getElementById('payloadOutput');
+            const signatureOutput = document.getElementById('signatureOutput');
+            
+            if (result.error) {
+                // Show error in all textareas
+                const errorText = JSON.stringify(result, null, 2);
+                headerOutput.value = errorText;
+                payloadOutput.value = '';
+                signatureOutput.value = '';
+                
+                // Add error styling
+                headerOutput.className = 'form-control error-output';
+                payloadOutput.className = 'form-control flex-grow-1';
+                signatureOutput.className = 'form-control';
+            } else {
+                // Show decoded parts
+                headerOutput.value = JSON.stringify(result.header, null, 2);
+                payloadOutput.value = JSON.stringify(result.payload, null, 2);
+                signatureOutput.value = result.signature;
+                
+                // Remove error styling
+                headerOutput.className = 'form-control';
+                payloadOutput.className = 'form-control';
+                signatureOutput.className = 'form-control';
+            }
+        }
+        
+        function clearOutputs() {
+            document.getElementById('headerOutput').value = '';
+            document.getElementById('payloadOutput').value = '';
+            document.getElementById('signatureOutput').value = '';
+            
+            // Reset styling
+            document.getElementById('headerOutput').className = 'form-control';
+            document.getElementById('payloadOutput').className = 'form-control';
+            document.getElementById('signatureOutput').className = 'form-control';
         }
         
         // Check for URL parameter on load (backward compatibility)
